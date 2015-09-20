@@ -220,7 +220,7 @@ void printInstructions(FILE *ofp, instruction* instructions)
         currLine++;
 
         // Check for halt instruction (SIO 0, 3), if found break out of the loop
-        if(instructions[currLine].OP == 1 && instructions[currLine].M == 3)
+        if(instructions[currLine].OP == 11 && instructions[currLine].M == 3)
             halt = true;
     }
 
