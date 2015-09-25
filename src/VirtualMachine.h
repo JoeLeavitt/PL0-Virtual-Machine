@@ -1,6 +1,12 @@
+/* Joseph Leavitt
+ * Header File for the PM/0 VM
+ * 9/25/2015
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 #define MAX_STACK_HEIGHT 200
 #define MAX_CODE_LENGTH 500
@@ -16,6 +22,6 @@ typedef struct Execute_Cycle_Instructions
 
 void read(FILE *ifp, instruction *instructions);
 void printInstructions(FILE *ofp, instruction* instructions);
-void printStacktrace(int prevPC, instruction *IR, int PC, int BP, int SP, int *stack, FILE *ofp)
-int base(int l, int base, int *stack);
+void printStacktrace(FILE *ofp, int prev, instruction *IR, int PC, int BP, int SP, int *stack);
+int base(int L, int BP, int stack[]);
 char *getOpcode(int OP);
