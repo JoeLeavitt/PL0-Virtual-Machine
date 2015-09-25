@@ -1,37 +1,34 @@
 /* Joseph Leavitt
- * PM/0 Virtual Machine
- * 09/20/15
+ * Main program for the PM/0 VM
+ * 09/25/2015
  */
 
 #include "VirtualMachine.h"
-#include <stdbool.h>
 
-int main(int argc, char *argv[1])
+int main(int argc, char *argv[])
 {
     // Initialize read and write files
     FILE *ifp = fopen(argv[1], "r");
-    FILE *ofp = fopen("mcode_stacktrace.txt", "w+");
+    FILE *ofp = fopen(argv[2], "w+");
+
+    // Exit program if a file was not opened
+    if(ifp == NULL) { printf("Input File Not Found\n");  return 0; }
+    if(ofp == NULL) { printf("Output File Not Found\n"); return 0; }
 
     // Register architecture
     int BP = 1; // Base Pointer
     int SP = 0; // Stack Pointer
     int PC = 0; // Program Counter
-    instruction *IR;
-
-     // Create and intialize an array of structs
-    instruction instructions[MAX_CODE_LENGTH];
-    read(ifp, instructions);
-
-    int data[MAX_STACK_HEIGHT];
-    int activationRecord;
+    instruction *IR; // Instructions (Opcode, Lexi. Level, Parameter)
+    int prev;
 
     // Initialize stack
     int stack[MAX_STACK_HEIGHT];
-    memset(stack, 0, sizeof(int));
+    memset(stack, 0, MAX_STACK_HEIGHT * sizeof(int));
 
-    // Exit program if a file was not opened
-    if(ifp == NULL)
-        printf("File Not Found");  return 0;
+    // Create and intialize an array of structs
+    instruction instructions[MAX_CODE_LENGTH];
+    read(ifp, instructions);
 
     // Close input file
     fclose(ifp);
@@ -39,17 +36,20 @@ int main(int argc, char *argv[1])
     // Print the instructions to be executed
     printInstructions(ofp, instructions);
 
-    // Print headers for the stacktrace
-    fprintf(ofp, "\n\n\t\t\t\t\tPC\tBP\tSP\tStack \nInitial Values \t\t\t\t%d\t%d\t%d\t%d\n", PC, BP, SP, stack[0]);
+    // Print header for the stacktrace
+    fprintf(ofp, "\n\n\t\t\t\t\tPC\tBP\tSP\tStack \nInitial Values \t\t\t\t\t%d\t%d\t%d\n", 0, 1, stack[0]);
+
+    printf("Fetch -> Execute Cycle\n");
 
     // Fetch -> Execute Cycle
     bool halt = false;
     while(halt == false)
     {
-        int prevPC = PC;
-
         // Get instruction
         IR = &instructions[PC];
+
+        // Save last program counter
+        prev = PC;
 
         // Set instructions for cleaner usage
         int OP = IR->OP;
@@ -60,8 +60,9 @@ int main(int argc, char *argv[1])
         {
             // LIT - Push value M onto the stack
             case 1:
-                SP += 1;
+                SP++;
                 stack[SP] = M;
+                PC++;
                 break;
             /* OPR - Return from a procedure call
              *       or do an ALU op, specified by M */
@@ -70,7 +71,9 @@ int main(int argc, char *argv[1])
                 {
                     // Return from a procedure call
                     case 0:
-                       // if(BP == 1) return 0;
+                       SP = BP - 1;
+                       PC = stack[SP + 4];
+                       BP = stack[SP + 3];
                         break;
                     // NEG - Pop once -> push the negation of the result
                     case 1:
@@ -105,24 +108,30 @@ int main(int argc, char *argv[1])
                         SP--;
                         stack[SP] = stack[SP] % stack[SP + 1];
                         break;
+                    // EQL - Pop twice -> push 1 if first = second, 0 otherwise
                     case 8:
                         SP--;
                         stack[SP] = stack[SP] == stack[SP + 1];
+                    // NEQ - Pop twice -> push 1 if first does not equal second, 0 otherwise
                     case 9:
                         SP--;
                         stack[SP] = stack[SP] != stack[SP + 1];
                         break;
+                    // LSS - Pop twice -> push 1 if second < first, 0 otherwise
                     case 10:
                         SP--;
                         stack[SP] = stack[SP] < stack[SP + 1];
                         break;
+                    // LEQ - Pop twice -> push 1 if second <= first, 0 otherwise
                     case 11:
                         SP--;
                         stack[SP] = stack[SP] <= stack[SP + 1];
                         break;
+                    // GTR - Pop twice -> push 1 if second > first, 0 otherwise
                     case 12:
                         SP--;
                         stack[SP] = stack[SP] > stack[SP + 1];
+                    // GEQ - Pop twice -> push 1 if second >= first, 0 otherwise
                     case 13:
                         SP--;
                         stack[SP] = stack[SP] >= stack[SP + 1];
@@ -130,25 +139,30 @@ int main(int argc, char *argv[1])
                 break;
             // LOD - Read the value at offset M, L levels down, and push onto stack
             case 3:
-                SP += 1;
-                stack[SP] = stack[L + M];
+                SP++;
+                stack[SP] = stack[base(L, BP, stack) + M];
+                PC++;
                 break;
             // STO - Pop the stack and write value into offset M, L levels down
             case 4:
-                stack[L + M] = stack[SP];
-                SP -= 1;
+                stack[base(L, BP, stack) + M] = stack[SP];
+                stack[SP] = 0;
+                SP--;
+                PC++;
+                break;
             // CAL - Call the procedure at M
             case 5:
                 stack[SP + 1] = 0;
-               // stack[SP + 2] = base();
+                stack[SP + 2] = base(L, BP, stack);
                 stack[SP + 3] = BP;
-                stack[SP + 4] = PC;
+                stack[SP + 4] = PC + 1;
                 BP = SP + 1;
                 PC = M;
                 break;
             // INC - Allocate space for M local variables, will always allocate atleast 4
             case 6:
                 SP = SP + M;
+                PC++;
                 break;
             // JMP - Branch to M
             case 7:
@@ -156,42 +170,55 @@ int main(int argc, char *argv[1])
                 break;
             // JPC - Pop the stack and branch to M if result is 0
             case 8:
+                if(stack[SP] == 0)
+                    PC = M;
+                else
+                    PC++;
+                SP--;
                 break;
             // SIO 1 - Pop the stack and write result to screen
             case 9:
                 printf("%d\n", stack[SP]);
-                SP += 1;
+                SP--;
+                PC++;
                 break;
             // SIO 2 - Take user input and push on the stack
             case 10:
-                printf("SIO 2 instruction\nplease enter Value:\n");
-                scanf("%d", &stack[++SP]);
+                printf("Enter Value:\n");
+                SP++;
+                scanf("%d", &stack[SP]);
+                PC++;
                 break;
             // SIO 3 - Terminate
             case 11:
+                printf("Halt\n");
                 halt = true;
+                BP = 0;
+                PC = 0;
+                SP = 0;
                 break;
             default:
                 printf("Invalid Opcode\n");
                 return 0;
         }
 
-        PC += 1;
-
-        printStacktrace(prevPC, IR, PC, BP, SP, stack, ofp);
+        // Print the stacktrace for the instructions that were just executed
+        printStacktrace(ofp, prev, IR, PC, BP, SP, stack);
     }
 
-    // Close output file
+    // Close
     fclose(ofp);
 
     return 0;
 }
 
+/* Insert instructions into struct array */
 void read(FILE *ifp, instruction *instructions)
 {
     int i = 0;
     char instructionRow[MAX_LINE_LENGTH];
 
+    // Reads the instructions line by line as a string then casts them as integers
     while(fgets(instructionRow, MAX_LINE_LENGTH, (FILE*)ifp) != NULL)
     {
          instructions[i].OP = (int)atoi((char*)strtok(instructionRow, " "));
@@ -204,55 +231,63 @@ void read(FILE *ifp, instruction *instructions)
 /* Print the instructions to be performed to the output file */
 void printInstructions(FILE *ofp, instruction* instructions)
 {
-    char codeString[MAX_CODE_LENGTH];
+    int currLine = 0;
+    char* codeString = malloc(MAX_CODE_LENGTH);
 
     sprintf(codeString, "%s", "Line\tOP\tL\tM\n");
 
     bool halt = false;
     while(halt == false)
     {
-        int currLine = 0;
+        // Check for halt instruction (SIO 0, 3), if found break out of the loop
+        if(instructions[currLine].OP == 11 && instructions[currLine].M == 3)
+            halt = true;
+
         sprintf(codeString + strlen(codeString), "%d\t%s\t%d\t%d\n",
                 currLine,
                 getOpcode(instructions[currLine].OP),
                 instructions[currLine].L,
-                instructions[currLine].M);
+                instructions[currLine].M)
+            ;
         currLine++;
-
-        // Check for halt instruction (SIO 0, 3), if found break out of the loop
-        if(instructions[currLine].OP == 11 && instructions[currLine].M == 3)
-            halt = true;
     }
 
     fprintf(ofp, "%s", codeString);
 }
 
 /* Print the stacktrace to the outputfile */
-void printStacktrace(int prevPC, instruction *IR, int PC, int BP, int SP, int *stack, FILE *ofp)
+void printStacktrace(FILE *ofp, int prevPC, instruction *IR, int PC, int BP, int SP, int *stack)
 {
     int i;
-    char stacktraceLine[200];
+    char *stacktraceLine = malloc(MAX_CODE_LENGTH);
 
-    sprintf(stacktraceLine, "%d\t%s\t%d\t%d\t%d\t%d\t%d\t",
+    sprintf(stacktraceLine + strlen(stacktraceLine), "%d\t%s\t%d\t%d\t%d\t%d\t%d\t",
             prevPC, getOpcode(IR->OP), IR->L, IR->M, PC, BP, SP);
 
     for(i = 1; i <= SP; i++)
-        sprintf(stacktraceLine, "%d ", stack[i]);
+    {
+        if(i == BP && BP != 1)
+            sprintf(stacktraceLine + strlen(stacktraceLine), "| ");
+
+        sprintf(stacktraceLine + strlen(stacktraceLine), "%d ", stack[i]);
+    }
+
+    sprintf(stacktraceLine + strlen(stacktraceLine), "\n");
 
     fprintf(ofp, "%s", stacktraceLine);
 }
 
 /* Find the base */
-// Not sure if im going to use this yet
-int base(int l, int base, int *stack)
+int base(int L, int BP, int stack[])
 {
-     int b1 = base;
-     while(1 > 0)
+    int baseLevel;
+    baseLevel = BP;
+    while(L > 0)
      {
-         b1 = stack[b1 + 1];
-         l--;
+         baseLevel = stack[baseLevel + 1];
+         L--;
      }
-     return b1;
+     return baseLevel;
 }
 
 /* Returns the Opcode name corresponding to the Opcode number */
@@ -271,7 +306,7 @@ char *getOpcode(int OP)
         case 5:
             return "cal";
         case 6:
-            return "inv";
+            return "inc";
         case 7:
             return "jmp";
         case 8:
